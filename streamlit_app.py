@@ -6,8 +6,8 @@ import plotly.graph_objects as go
 from datetime import date, datetime
 
 if not os.path.exists("orders.db"):
-    st.error("orders.db 없음. 먼저 `python scripts/run_once.py` 실행하세요.")
-    st.stop()
+    from app.db import init_db
+    init_db()
 
 from app.metrics import get_summary, get_project_channels, CHANNEL_LABELS
 from app.config import PROJECTS

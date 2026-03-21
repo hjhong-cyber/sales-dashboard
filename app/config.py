@@ -4,8 +4,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+def _get_env(key: str, default: str = None) -> str | None:
+    """os.environ 또는 Streamlit secrets에서 값 읽기"""
+    val = _get_env(key)
+    if val:
+        return val
+    try:
+        import streamlit as st
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
+
 # ── 공통 ──────────────────────────────────────────
-FETCH_DAYS = int(os.getenv("FETCH_DAYS", "30"))
+FETCH_DAYS = int(_get_env("FETCH_DAYS", "30"))
 
 # ── 프로젝트 레지스트리 ───────────────────────────
 # channels: 현재 연동된 채널 목록 (자격증명이 있는 것만)
@@ -24,8 +35,8 @@ PROJECTS = {
 def get_naver_creds(project: str) -> dict | None:
     """프로젝트의 네이버 자격증명 반환. 없으면 None."""
     prefix = project.upper()
-    client_id     = os.getenv(f"{prefix}_NAVER_CLIENT_ID")
-    client_secret = os.getenv(f"{prefix}_NAVER_CLIENT_SECRET")
+    client_id     = _get_env(f"{prefix}_NAVER_CLIENT_ID")
+    client_secret = _get_env(f"{prefix}_NAVER_CLIENT_SECRET")
     if client_id and client_secret:
         return {"client_id": client_id, "client_secret": client_secret}
     return None
@@ -33,9 +44,9 @@ def get_naver_creds(project: str) -> dict | None:
 
 def get_cafe24_creds(project: str) -> dict | None:
     prefix = project.upper()
-    mall_id       = os.getenv(f"{prefix}_CAFE24_MALL_ID")
-    client_id     = os.getenv(f"{prefix}_CAFE24_CLIENT_ID")
-    client_secret = os.getenv(f"{prefix}_CAFE24_CLIENT_SECRET")
+    mall_id       = _get_env(f"{prefix}_CAFE24_MALL_ID")
+    client_id     = _get_env(f"{prefix}_CAFE24_CLIENT_ID")
+    client_secret = _get_env(f"{prefix}_CAFE24_CLIENT_SECRET")
     if mall_id and client_id and client_secret:
         return {"mall_id": mall_id, "client_id": client_id, "client_secret": client_secret}
     return None
@@ -43,9 +54,9 @@ def get_cafe24_creds(project: str) -> dict | None:
 
 def get_coupang_creds(project: str) -> dict | None:
     prefix = project.upper()
-    access_key = os.getenv(f"{prefix}_COUPANG_ACCESS_KEY")
-    secret_key = os.getenv(f"{prefix}_COUPANG_SECRET_KEY")
-    vendor_id  = os.getenv(f"{prefix}_COUPANG_VENDOR_ID")
+    access_key = _get_env(f"{prefix}_COUPANG_ACCESS_KEY")
+    secret_key = _get_env(f"{prefix}_COUPANG_SECRET_KEY")
+    vendor_id  = _get_env(f"{prefix}_COUPANG_VENDOR_ID")
     if access_key and secret_key and vendor_id:
         return {"access_key": access_key, "secret_key": secret_key, "vendor_id": vendor_id}
     return None
@@ -53,8 +64,8 @@ def get_coupang_creds(project: str) -> dict | None:
 
 def get_shopify_creds(project: str) -> dict | None:
     prefix = project.upper()
-    shop_domain   = os.getenv(f"{prefix}_SHOPIFY_SHOP_DOMAIN")
-    access_token  = os.getenv(f"{prefix}_SHOPIFY_ACCESS_TOKEN")
+    shop_domain   = _get_env(f"{prefix}_SHOPIFY_SHOP_DOMAIN")
+    access_token  = _get_env(f"{prefix}_SHOPIFY_ACCESS_TOKEN")
     if shop_domain and access_token:
         return {"shop_domain": shop_domain, "access_token": access_token}
     return None
