@@ -6,7 +6,7 @@ load_dotenv()
 
 def _get_env(key: str, default: str = None) -> str | None:
     """os.environ 또는 Streamlit secrets에서 값 읽기"""
-    val = _get_env(key)
+    val = os.getenv(key)
     if val:
         return val
     try:
