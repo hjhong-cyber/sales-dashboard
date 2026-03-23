@@ -1,5 +1,6 @@
 """통합 매출 대시보드 - 멀티 프로젝트 × 멀티 채널"""
 import os
+import subprocess
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
@@ -379,6 +380,21 @@ def show_excel_upload(project_key: str, project_name: str):
 
 REFRESH_DAYS = 15  # 갱신 시 최근 N일만 조회
 
+
+def _auto_push():
+    """갱신 후 orders.db를 자동으로 git commit & push (Streamlit Cloud 반영)"""
+    try:
+        repo_dir = os.path.dirname(os.path.abspath(__file__))
+        subprocess.run(["git", "add", "orders.db"], cwd=repo_dir, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", f"auto: 매출 데이터 갱신 ({date.today()})"],
+            cwd=repo_dir, check=True, capture_output=True,
+        )
+        subprocess.run(["git", "push"], cwd=repo_dir, check=True, capture_output=True)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
 def _refresh_project_data(project_key: str):
     """프로젝트의 API 채널 데이터만 갱신 (수동입력/엑셀 유지, 최근 15일)"""
     from app.config import get_naver_creds, get_cafe24_creds
@@ -423,6 +439,8 @@ def show_project_dashboard(project_key: str, project_name: str):
                 results = _refresh_project_data(project_key)
             if results:
                 st.toast(" | ".join(results))
+                if _auto_push():
+                    st.toast("클라우드 대시보드에 반영 완료!")
             else:
                 st.toast("갱신할 API 채널이 없습니다.")
             st.rerun()
@@ -692,6 +710,8 @@ def show_all_dashboard():
             if all_results:
                 for r in all_results:
                     st.toast(r)
+                if _auto_push():
+                    st.toast("클라우드 대시보드에 반영 완료!")
             else:
                 st.toast("갱신 완료")
             st.rerun()
