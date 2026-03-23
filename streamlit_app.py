@@ -328,37 +328,44 @@ def show_excel_upload(project_key: str, project_name: str):
 
     if uploaded and btn:
         try:
-            df = pd.read_excel(uploaded, header=None)
+            xls = pd.ExcelFile(uploaded)
         except Exception as e:
             st.error(f"엑셀 읽기 실패: {e}")
             return
 
-        data_df = df.iloc[1:].copy()
-        data_df = data_df.dropna(subset=[1, 10])
-
+        # 모든 시트에서 B열(날짜), K열(결제금액) 읽어서 합산
         orders = []
-        for idx, row in data_df.iterrows():
+        for sheet_name in xls.sheet_names:
             try:
-                raw_date = row[1]
-                if isinstance(raw_date, datetime):
-                    order_date = raw_date.strftime("%Y-%m-%d")
-                else:
-                    order_date = str(raw_date)[:10]
-
-                amount = int(float(row[10]))
-                order_id = f"{project_key}_{order_date}_{idx}"
-
-                orders.append({
-                    "order_id": order_id,
-                    "product_name": str(row[4]) if pd.notna(row.get(4)) else "",
-                    "quantity": 1,
-                    "unit_price": amount,
-                    "payment_amount": amount,
-                    "order_status": "paid",
-                    "order_date": order_date,
-                })
-            except (ValueError, TypeError):
+                df = pd.read_excel(xls, sheet_name=sheet_name, header=None)
+            except Exception:
                 continue
+
+            data_df = df.iloc[1:].copy()
+            data_df = data_df.dropna(subset=[1, 10])
+
+            for idx, row in data_df.iterrows():
+                try:
+                    raw_date = row[1]
+                    if isinstance(raw_date, datetime):
+                        order_date = raw_date.strftime("%Y-%m-%d")
+                    else:
+                        order_date = str(raw_date)[:10]
+
+                    amount = int(float(row[10]))
+                    order_id = f"{project_key}_{sheet_name}_{order_date}_{idx}"
+
+                    orders.append({
+                        "order_id": order_id,
+                        "product_name": str(row[4]) if pd.notna(row.get(4)) else "",
+                        "quantity": 1,
+                        "unit_price": amount,
+                        "payment_amount": amount,
+                        "order_status": "paid",
+                        "order_date": order_date,
+                    })
+                except (ValueError, TypeError):
+                    continue
 
         if not orders:
             st.warning("유효한 데이터가 없습니다.")
