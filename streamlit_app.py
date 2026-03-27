@@ -754,7 +754,7 @@ def _manual_sales_input(project_key: str):
 
 
 def _manual_data_manager(project_key: str):
-    """수동 입력/엑셀 업로드 데이터 확인 및 삭제"""
+    """수동 입력/엑셀 업로드 데이터 확인, 수정, 삭제"""
     from app.db import get_conn
 
     # 수동 입력 데이터 조회 (order_status='manual' 또는 channel='excel')
@@ -773,25 +773,75 @@ def _manual_data_manager(project_key: str):
         return
 
     with st.expander("수동 입력 데이터 관리", expanded=False):
-        for ch, month, total, cnt, status in rows:
+        for i, (ch, month, total, cnt, status) in enumerate(rows):
             label = CHANNEL_LABELS.get(ch, ch)
             source = "📝 수동입력" if status == "manual" else "📊 엑셀"
-            col_info, col_del = st.columns([5, 1])
-            with col_info:
+            row_key = f"{project_key}_{ch}_{month}"
+            edit_key = f"editing_{row_key}"
+
+            # 수정 모드
+            if st.session_state.get(edit_key, False):
                 st.markdown(
                     f'<span style="color:#8b8fa3;font-size:0.85rem;">{source}</span> '
-                    f'**{label}** · {month} · ₩{total:,} ({cnt}건)',
+                    f'**{label}** · {month}',
                     unsafe_allow_html=True,
                 )
-            with col_del:
-                if st.button("삭제", key=f"del_{project_key}_{ch}_{month}", type="secondary"):
-                    with get_conn() as conn:
-                        conn.execute("""
-                            DELETE FROM orders
-                            WHERE project=? AND channel=? AND SUBSTR(order_date,1,7)=?
-                              AND (order_status='manual' OR channel='excel')
-                        """, (project_key, ch, month))
-                    st.rerun()
+                col_amt, col_save, col_cancel = st.columns([3, 1, 1])
+                with col_amt:
+                    new_amount = st.number_input(
+                        "수정 금액", value=total, step=10000,
+                        key=f"edit_amt_{row_key}", label_visibility="collapsed",
+                    )
+                with col_save:
+                    if st.button("저장", key=f"save_{row_key}", type="primary"):
+                        with get_conn() as conn:
+                            # 기존 데이터 삭제 후 새 금액으로 1건 저장
+                            conn.execute("""
+                                DELETE FROM orders
+                                WHERE project=? AND channel=? AND SUBSTR(order_date,1,7)=?
+                                  AND (order_status='manual' OR channel='excel')
+                            """, (project_key, ch, month))
+                            from datetime import datetime as dt
+                            conn.execute("""
+                                INSERT INTO orders (project, channel, order_id, product_name,
+                                    quantity, unit_price, payment_amount, order_status, order_date, saved_at)
+                                VALUES (?,?,?,?,1,?,?,'manual',?,?)
+                            """, (
+                                project_key, ch,
+                                f"manual_{project_key}_{ch}_{month}",
+                                f"{label} 수동입력",
+                                new_amount, new_amount,
+                                f"{month}-01",
+                                dt.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            ))
+                        st.session_state[edit_key] = False
+                        st.rerun()
+                with col_cancel:
+                    if st.button("취소", key=f"cancel_{row_key}"):
+                        st.session_state[edit_key] = False
+                        st.rerun()
+            else:
+                # 보기 모드
+                col_info, col_edit, col_del = st.columns([4, 1, 1])
+                with col_info:
+                    st.markdown(
+                        f'<span style="color:#8b8fa3;font-size:0.85rem;">{source}</span> '
+                        f'**{label}** · {month} · ₩{total:,} ({cnt}건)',
+                        unsafe_allow_html=True,
+                    )
+                with col_edit:
+                    if st.button("수정", key=f"edit_{row_key}", type="secondary"):
+                        st.session_state[edit_key] = True
+                        st.rerun()
+                with col_del:
+                    if st.button("삭제", key=f"del_{row_key}", type="secondary"):
+                        with get_conn() as conn:
+                            conn.execute("""
+                                DELETE FROM orders
+                                WHERE project=? AND channel=? AND SUBSTR(order_date,1,7)=?
+                                  AND (order_status='manual' OR channel='excel')
+                            """, (project_key, ch, month))
+                        st.rerun()
 
 
 # ── 전체 대시보드 (프로젝트별 매출) ─────────────────
