@@ -137,8 +137,9 @@ def metric_card(label: str, amount: int, sub: str = ""):
 
 def channel_donut_with_legend(channels_data: list, center_label: str, center_amount: int, key: str):
     """큰 도넛 차트 + 중앙 금액 + 하단 범례"""
+    # 데이터 없으면 빈 도넛 표시 (컬럼 높이 맞춤)
     if not channels_data:
-        return
+        channels_data = [{"channel": "_empty", "label": "-", "amount": 1}]
 
     labels = [ch["label"] for ch in channels_data]
     amounts = [ch["amount"] for ch in channels_data]
@@ -380,6 +381,63 @@ def show_excel_upload(project_key: str, project_name: str):
 
 REFRESH_DAYS = 15  # 갱신 시 최근 N일만 조회
 
+# ── 공동구매 Google Sheets 연동 ───────────────────
+GROUPBUY_SHEET_ID = "1-0DhO5cNhhq5_kaOhN9RDzg1WSocebvSp2sL3KGt_38"
+GROUPBUY_GID = "382400914"
+
+
+def fetch_groupbuy_from_sheets():
+    """공구관리시스템 스프레드시트에서 매출 데이터 가져오기"""
+    from app.db import get_conn, save_orders
+
+    url = f"https://docs.google.com/spreadsheets/d/{GROUPBUY_SHEET_ID}/gviz/tq?tqx=out:csv&gid={GROUPBUY_GID}"
+    try:
+        df = pd.read_csv(url, header=None)
+    except Exception as e:
+        return f"스프레드시트 읽기 실패: {e}"
+
+    orders = []
+    for idx, row in df.iterrows():
+        # NO 컬럼(0번)이 숫자인 행만 데이터
+        try:
+            no = int(row[0])
+        except (ValueError, TypeError):
+            continue
+
+        try:
+            revenue = int(float(str(row[9]).replace(",", "")))
+        except (ValueError, TypeError):
+            continue
+
+        if revenue <= 0:
+            continue
+
+        # 개시일을 order_date로 사용
+        start_date = str(row[5])[:10] if pd.notna(row[5]) else ""
+        product_name = str(row[4]) if pd.notna(row[4]) else ""
+        seller = str(row[2]) if pd.notna(row[2]) else ""
+        company = str(row[3]) if pd.notna(row[3]) else ""
+
+        order_id = f"groupbuy_sheets_{no}"
+        orders.append({
+            "order_id": order_id,
+            "product_name": f"{company} - {product_name}" if company else product_name,
+            "quantity": 1,
+            "unit_price": revenue,
+            "payment_amount": revenue,
+            "order_status": str(row[14]) if pd.notna(row[14]) else "paid",
+            "order_date": start_date,
+        })
+
+    if not orders:
+        return "유효한 데이터가 없습니다."
+
+    # 기존 sheets 데이터 삭제 후 새로 저장
+    with get_conn() as conn:
+        conn.execute("DELETE FROM orders WHERE project='groupbuy' AND channel='sheets'")
+    saved = save_orders("groupbuy", "sheets", orders)
+    return f"공동구매: {len(orders)}건 조회, {saved}건 저장 완료"
+
 
 def _auto_push():
     """갱신 후 orders.db를 자동으로 git commit & push (Streamlit Cloud 반영)"""
@@ -401,6 +459,12 @@ def _refresh_project_data(project_key: str):
     from app.db import save_orders
 
     results = []
+
+    # 공동구매: Google Sheets에서 가져오기
+    if project_key == "groupbuy":
+        result = fetch_groupbuy_from_sheets()
+        results.append(result)
+        return results
 
     # 네이버
     naver_creds = get_naver_creds(project_key)
@@ -514,6 +578,9 @@ def show_project_dashboard(project_key: str, project_name: str):
 
     # ── 수동 매출 입력 ──
     _manual_sales_input(project_key)
+
+    # ── 수동 입력 데이터 관리 ──
+    _manual_data_manager(project_key)
 
     st.divider()
 
@@ -686,6 +753,47 @@ def _manual_sales_input(project_key: str):
             st.rerun()
 
 
+def _manual_data_manager(project_key: str):
+    """수동 입력/엑셀 업로드 데이터 확인 및 삭제"""
+    from app.db import get_conn
+
+    # 수동 입력 데이터 조회 (order_status='manual' 또는 channel='excel')
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT channel, SUBSTR(order_date,1,7) AS month,
+                   SUM(payment_amount) AS total, COUNT(*) AS cnt,
+                   order_status
+            FROM orders
+            WHERE project=? AND (order_status='manual' OR channel='excel')
+            GROUP BY channel, month
+            ORDER BY month DESC, channel
+        """, (project_key,)).fetchall()
+
+    if not rows:
+        return
+
+    with st.expander("수동 입력 데이터 관리", expanded=False):
+        for ch, month, total, cnt, status in rows:
+            label = CHANNEL_LABELS.get(ch, ch)
+            source = "📝 수동입력" if status == "manual" else "📊 엑셀"
+            col_info, col_del = st.columns([5, 1])
+            with col_info:
+                st.markdown(
+                    f'<span style="color:#8b8fa3;font-size:0.85rem;">{source}</span> '
+                    f'**{label}** · {month} · ₩{total:,} ({cnt}건)',
+                    unsafe_allow_html=True,
+                )
+            with col_del:
+                if st.button("삭제", key=f"del_{project_key}_{ch}_{month}", type="secondary"):
+                    with get_conn() as conn:
+                        conn.execute("""
+                            DELETE FROM orders
+                            WHERE project=? AND channel=? AND SUBSTR(order_date,1,7)=?
+                              AND (order_status='manual' OR channel='excel')
+                        """, (project_key, ch, month))
+                    st.rerun()
+
+
 # ── 전체 대시보드 (프로젝트별 매출) ─────────────────
 
 def show_all_dashboard():
@@ -771,12 +879,14 @@ tab_keys = [None] + list(PROJECTS.keys())
 tabs = st.tabs(tab_labels)
 
 # 엑셀 업로드 대상 프로젝트 (API 연동 없는 프로젝트)
-EXCEL_UPLOAD_PROJECTS = {"lecture", "groupbuy"}
+EXCEL_UPLOAD_PROJECTS = {"lecture"}
 
 for tab, project_key in zip(tabs, tab_keys):
     with tab:
         if project_key is None:
             show_all_dashboard()
+        elif project_key == "groupbuy":
+            show_project_dashboard(project_key, PROJECTS[project_key]["name"])
         else:
             if project_key in EXCEL_UPLOAD_PROJECTS:
                 show_excel_upload(project_key, PROJECTS[project_key]["name"])
