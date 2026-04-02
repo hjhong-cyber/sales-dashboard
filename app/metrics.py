@@ -34,16 +34,35 @@ def _period_metrics(conn, where: str, params: tuple) -> dict:
     return {"count": row[0], "amount": row[1]}
 
 
-def get_summary(project: str | None = None, channel: str | None = None) -> dict:
+def get_available_months(project: str | None = None) -> list[str]:
+    """DB에 있는 월 목록을 최신순으로 반환"""
+    filters = []
+    params = ()
+    if project:
+        filters.append("project = ?")
+        params = (project,)
+    base = " AND ".join(filters) if filters else "1=1"
+    with get_conn() as conn:
+        rows = conn.execute(f"""
+            SELECT DISTINCT SUBSTR(order_date,1,7) AS month
+            FROM orders WHERE ({base}) AND order_date != ''
+            ORDER BY month DESC
+        """, params).fetchall()
+    return [r[0] for r in rows]
+
+
+def get_summary(project: str | None = None, channel: str | None = None,
+                target_month: str | None = None) -> dict:
     """
     project=None  → 전체 회사 합산
     project='glener' → 해당 프로젝트만
     channel=None  → 전체 채널 합산
     channel='naver' → 해당 채널만
+    target_month='2026-03' → 특정 월 데이터 조회 (None이면 당월)
     """
     today      = date.today().isoformat()
     this_year  = today[:4]
-    this_month = today[:7]
+    this_month = target_month or today[:7]
 
     filters = []
     params_base = ()

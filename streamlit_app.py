@@ -10,7 +10,7 @@ if not os.path.exists("orders.db"):
     from app.db import init_db
     init_db()
 
-from app.metrics import get_summary, get_project_channels, CHANNEL_LABELS
+from app.metrics import get_summary, get_project_channels, get_available_months, CHANNEL_LABELS
 from app.config import PROJECTS
 
 st.set_page_config(page_title="매출 대시보드", layout="wide")
@@ -108,8 +108,66 @@ h4 { color: #e0e0e0 !important; }
 /* metric 기본 스타일 숨기기 */
 [data-testid="stMetricLabel"] { display: none; }
 [data-testid="stMetricValue"] { display: none; }
+
+/* 월 선택 드롭다운 다크 스타일 */
+.month-select-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0 12px 0;
+}
+.month-select-wrap select {
+    background: #1e2130;
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px;
+    padding: 7px 32px 7px 14px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+    outline: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238b8fa3' viewBox='0 0 16 16'%3E%3Cpath d='M1.5 5.5l6.5 6 6.5-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+}
+.month-select-wrap select:hover {
+    border-color: #3D5AFE;
+}
+.month-select-wrap select:focus {
+    border-color: #3D5AFE;
+    box-shadow: 0 0 0 2px rgba(61,90,254,0.25);
+}
 </style>
 """, unsafe_allow_html=True)
+
+
+def month_selector(available_months: list[str], key: str) -> str:
+    """다크 테마 드롭다운으로 월 선택. 2026년만 표시."""
+    current_year = str(date.today().year)
+    current_month = date.today().isoformat()[:7]
+
+    # 올해 월만 필터링
+    months = [m for m in available_months if m.startswith(current_year)]
+    if current_month not in months:
+        months.insert(0, current_month)
+    months.sort(reverse=True)
+
+    # 표시용 라벨
+    month_labels = {m: f"{int(m[5:])}월" for m in months}
+    if current_month in month_labels:
+        month_labels[current_month] += " (당월)"
+
+    selected = st.selectbox(
+        "조회 월",
+        months,
+        index=0,
+        format_func=lambda m: month_labels.get(m, m),
+        key=f"{key}_month_sel",
+        label_visibility="collapsed",
+    )
+    return selected
 
 
 def fmt_amount(amount: int) -> str:
@@ -492,10 +550,14 @@ def _refresh_project_data(project_key: str):
 
 
 def show_project_dashboard(project_key: str, project_name: str):
-    # 타이틀 + 갱신 버튼
-    col_title, col_refresh = st.columns([5, 1])
+    # 타이틀 + 월 선택 + 갱신 버튼
+    col_title, col_month, col_refresh = st.columns([4, 1, 1])
     with col_title:
         st.title(f"{project_name}")
+    with col_month:
+        st.markdown("<br>", unsafe_allow_html=True)
+        available_months = get_available_months(project=project_key)
+        selected_month = month_selector(available_months, key=project_key)
     with col_refresh:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("매출 갱신", key=f"{project_key}_refresh", type="secondary", use_container_width=True):
@@ -509,13 +571,13 @@ def show_project_dashboard(project_key: str, project_name: str):
                 st.toast("갱신할 API 채널이 없습니다.")
             st.rerun()
 
-    total_data = get_summary(project=project_key, channel=None)
+    total_data = get_summary(project=project_key, channel=None, target_month=selected_month)
     channels = get_project_channels(project_key)
 
     # 채널별 데이터 미리 수집 (중복 호출 방지)
     ch_summaries = {}
     for ch in channels:
-        ch_summaries[ch] = get_summary(project=project_key, channel=ch)
+        ch_summaries[ch] = get_summary(project=project_key, channel=ch, target_month=selected_month)
 
     # 채널을 연도 매출 순으로 정렬
     channels_sorted = sorted(channels, key=lambda c: ch_summaries[c]["year"]["amount"], reverse=True)
@@ -548,11 +610,11 @@ def show_project_dashboard(project_key: str, project_name: str):
         ]
         channel_donut_with_legend(
             _top_channels(month_channels),
-            center_label=total_data["this_month"],
+            center_label=selected_month,
             center_amount=total_data["month"]["amount"],
             key=f"{project_key}_month_donut",
         )
-        metric_card(f"{total_data['this_month']} 매출", total_data["month"]["amount"])
+        metric_card(f"{selected_month} 매출", total_data["month"]["amount"])
 
     if not is_excel_project:
         with col3:
@@ -849,9 +911,13 @@ def _manual_data_manager(project_key: str):
 def show_all_dashboard():
     from app.config import PROJECTS as ALL_PROJECTS
 
-    col_title, col_refresh = st.columns([5, 1])
+    col_title, col_month, col_refresh = st.columns([4, 1, 1])
     with col_title:
         st.title("전체 매출")
+    with col_month:
+        st.markdown("<br>", unsafe_allow_html=True)
+        available_months = get_available_months(project=None)
+        selected_month = month_selector(available_months, key="all")
     with col_refresh:
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("전체 갱신", key="all_refresh", type="secondary", use_container_width=True):
@@ -859,7 +925,6 @@ def show_all_dashboard():
                 from app.config import get_naver_creds, get_cafe24_creds
                 all_results = []
                 for pk in ALL_PROJECTS:
-                    # API 없는 프로젝트 건너뛰기
                     if not get_naver_creds(pk) and not get_cafe24_creds(pk):
                         continue
                     results = _refresh_project_data(pk)
@@ -874,10 +939,10 @@ def show_all_dashboard():
                 st.toast("갱신 완료")
             st.rerun()
 
-    data = get_summary(project=None, channel=None)
+    data = get_summary(project=None, channel=None, target_month=selected_month)
     proj_summaries = {}
     for pk in ALL_PROJECTS:
-        proj_summaries[pk] = get_summary(project=pk, channel=None)
+        proj_summaries[pk] = get_summary(project=pk, channel=None, target_month=selected_month)
 
     # 데이터가 있는 프로젝트만
     active_projects = [pk for pk in ALL_PROJECTS if proj_summaries[pk]["year"]["amount"] > 0]
@@ -904,11 +969,11 @@ def show_all_dashboard():
         ]
         channel_donut_with_legend(
             month_projs,
-            center_label=data["this_month"],
+            center_label=selected_month,
             center_amount=data["month"]["amount"],
             key="all_month_donut",
         )
-        metric_card(f"{data['this_month']} 매출", data["month"]["amount"])
+        metric_card(f"{selected_month} 매출", data["month"]["amount"])
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.divider()
