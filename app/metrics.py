@@ -1,4 +1,5 @@
 """DB 집계 - 멀티 프로젝트 × 멀티 채널"""
+from __future__ import annotations
 from datetime import date
 from app.db import get_conn
 
